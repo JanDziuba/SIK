@@ -1,0 +1,123 @@
+#!/usr/bin/env python3.6
+
+import sys
+import os
+import subprocess
+from pathlib import Path
+import signal
+import atexit
+
+
+def exit_handler():
+    if os.path.isfile('stunnel.pid'):
+        stunnel_pid_file = open("stunnel.pid", "r")
+        pid = int(stunnel_pid_file.read())
+        os.kill(pid, signal.SIGKILL)
+        subprocess.run(["rm", "stunnel.pid"])
+
+    if os.path.isfile('stunnel.conf'):
+        subprocess.run(["rm", "stunnel.conf"])
+
+
+atexit.register(exit_handler)
+
+
+def check_if_https(url):
+    if url.find("https") == 0:
+        return True
+    else:
+        return False
+
+
+def check_if_has_port(url):
+    if check_if_https(url):
+        if url[len("https://"):].find(":") >= 0:
+            return True
+        else:
+            return False
+    else:
+        if url[len("http://"):].find(":") >= 0:
+            return True
+        else:
+            return False
+
+
+def get_port(url, has_port, is_https):
+    if has_port:
+        if is_https:
+            port_start = url[len("https://"):].find(":") + 1 + len("https://")
+        else:
+            port_start = url[len("http://"):].find(":") + 1 + len("http://")
+
+        port_end = url[port_start:].find("/") + port_start
+        return url[port_start:port_end]
+    else:
+        if is_https:
+            return "443"
+        else:
+            return "80"
+
+
+def get_address(url, has_port, is_https):
+    if is_https:
+        address_start = len("https://")
+    else:
+        address_start = len("http://")
+
+    if has_port:
+        address_end = url[address_start:].find(":") + address_start
+    else:
+        address_end = url[address_start:].find("/") + address_start
+
+    return url[address_start:address_end]
+
+
+def get_parent_dir(path):
+    path = Path(path)
+    return str(path.parent)
+
+
+def make_https_request(address, port, cookies_path, url):
+    parent_dir = get_parent_dir(os.path.abspath(__file__))
+
+    stunnel_conf_file = open("stunnel.conf", "w+")
+    stunnel_conf_file.write("pid = " + parent_dir + "/stunnel.pid\n"
+                            + "[service]\n"
+                            + "client = yes\n"
+                            + "accept = 127.0.0.1:3333\n"
+                            + "connect = " + address + ":" + port + "\n")
+
+    stunnel_conf_file.close()
+
+    subprocess.run(["stunnel", parent_dir + "/stunnel.conf"])
+
+    subprocess.run(["./testhttp_raw", "127.0.0.1" + ":" + "3333",
+                    cookies_path, url])
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: ", sys.argv[0],
+              "<plik ciasteczek> <testowany adres http>\n",
+              file=sys.stderr)
+        exit(1)
+
+    cookies_path = sys.argv[1]
+    url = sys.argv[2]
+
+    has_port = check_if_has_port(url)
+    is_https = check_if_https(url)
+
+    port = get_port(url, has_port, is_https)
+    address = get_address(url, has_port, is_https)
+
+    if is_https:
+        make_https_request(address, port, cookies_path, url)
+
+    else:
+        subprocess.run(["./testhttp_raw", address + ":" + port, cookies_path,
+                        url])
+
+
+if __name__ == "__main__":
+    main()
